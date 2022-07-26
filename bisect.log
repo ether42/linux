@@ -1,0 +1,31 @@
+git bisect start
+# good: [eed68052d2016d9f96d6656435099762608120e3] Linux 5.17.15
+git bisect good eed68052d2016d9f96d6656435099762608120e3
+# bad: [4b0986a3613c92f4ec1bdc7f60ec66fea135991f] Linux 5.18
+git bisect bad 4b0986a3613c92f4ec1bdc7f60ec66fea135991f
+# good: [f443e374ae131c168a065ea1748feac6b2e76613] Linux 5.17
+git bisect good f443e374ae131c168a065ea1748feac6b2e76613
+# good: [25fd2d41b505d0640bdfe67aa77c549de2d3c18a] selftests: kselftest framework: provide "finished" helper
+git bisect good 25fd2d41b505d0640bdfe67aa77c549de2d3c18a
+# bad: [02e2af20f4f9f2aa0c84e9a30a35c02f0fbb7daa] Merge tag 'char-misc-5.18-rc1' of git://git.kernel.org/pub/scm/linux/kernel/git/gregkh/char-misc
+git bisect bad 02e2af20f4f9f2aa0c84e9a30a35c02f0fbb7daa
+# bad: [9a8b3d5f71eb74b1b95927bd320b1070866a119a] Merge tag 'mips_5.18' of git://git.kernel.org/pub/scm/linux/kernel/git/mips/linux
+git bisect bad 9a8b3d5f71eb74b1b95927bd320b1070866a119a
+# bad: [54f43c17d681f6d9523fcfaeefc9df77993802e1] Merge tag 'drm-misc-next-2022-02-23' of git://anongit.freedesktop.org/drm/drm-misc into drm-next
+git bisect bad 54f43c17d681f6d9523fcfaeefc9df77993802e1
+# bad: [30424ebae8df0f786835e7a31ad790fa00764f35] Merge tag 'drm-intel-gt-next-2022-02-17' of git://anongit.freedesktop.org/drm/drm-intel into drm-intel-next
+git bisect bad 30424ebae8df0f786835e7a31ad790fa00764f35
+# good: [48bb92d91ae9331138656f369e66b5cab8f0fa7e] drm/i915: Drop pointless i830 PIPECONF read
+git bisect good 48bb92d91ae9331138656f369e66b5cab8f0fa7e
+# good: [8f0991cccec93665dd6ecd88dbefd7db2b28c85e] drm/i915/dsi: disassociate VBT video transfer mode from register values
+git bisect good 8f0991cccec93665dd6ecd88dbefd7db2b28c85e
+# good: [53dbee4926d3706ca9e03f3928fa85b5ec3bc0cc] Merge tag 'drm-misc-next-2022-01-27' of git://anongit.freedesktop.org/drm/drm-misc into drm-next
+git bisect good 53dbee4926d3706ca9e03f3928fa85b5ec3bc0cc
+# bad: [876f7a438e4247a948268ad77b67c494f709cc30] Merge drm/drm-next into drm-intel-gt-next
+git bisect bad 876f7a438e4247a948268ad77b67c494f709cc30
+# bad: [4e68354667716e62089ce3032a3c7e1b6c07e669] drm/i915/selftests: Add a cancel request selftest that triggers a reset
+git bisect bad 4e68354667716e62089ce3032a3c7e1b6c07e669
+# bad: [647bfd26bf054313305ea9c2c4a1c71f3bbfee63] Merge drm/drm-next into drm-intel-gt-next
+git bisect bad 647bfd26bf054313305ea9c2c4a1c71f3bbfee63
+# good: [4efdddbce7c1329f00c458e85dcaf105aebdc0ed] Merge tag 'amd-drm-next-5.17-2022-01-12' of https://gitlab.freedesktop.org/agd5f/linux into drm-next
+git bisect good 4efdddbce7c1329f00c458e85dcaf105aebdc0ed

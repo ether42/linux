@@ -29,6 +29,7 @@
 #include "i915_gem_ioctls.h"
 #include "i915_trace.h"
 #include "i915_user_extensions.h"
+#include "i915_vma_snapshot.h"
 
 struct eb_vma {
 	struct i915_vma *vma;
@@ -1094,7 +1095,7 @@ static inline struct i915_ggtt *cache_to_ggtt(struct reloc_cache *cache)
 {
 	struct drm_i915_private *i915 =
 		container_of(cache, struct i915_execbuffer, reloc_cache)->i915;
-	return to_gt(i915)->ggtt;
+	return &i915->ggtt;
 }
 
 static void reloc_cache_unmap(struct reloc_cache *cache)
@@ -1410,7 +1411,7 @@ eb_relocate_entry(struct i915_execbuffer *eb,
 			mutex_lock(&vma->vm->mutex);
 			err = i915_vma_bind(target->vma,
 					    target->vma->obj->cache_level,
-					    PIN_GLOBAL, NULL, NULL);
+					    PIN_GLOBAL, NULL);
 			mutex_unlock(&vma->vm->mutex);
 			reloc_cache_remap(&eb->reloc_cache, ev->vma->obj);
 			if (err)
@@ -1940,6 +1941,7 @@ static void eb_capture_stage(struct i915_execbuffer *eb)
 {
 	const unsigned int count = eb->buffer_count;
 	unsigned int i = count, j;
+	struct i915_vma_snapshot *vsnap;
 
 	while (i--) {
 		struct eb_vma *ev = &eb->vma[i];
@@ -1949,6 +1951,11 @@ static void eb_capture_stage(struct i915_execbuffer *eb)
 		if (!(flags & EXEC_OBJECT_CAPTURE))
 			continue;
 
+		vsnap = i915_vma_snapshot_alloc(GFP_KERNEL);
+		if (!vsnap)
+			continue;
+
+		i915_vma_snapshot_init(vsnap, vma, "user");
 		for_each_batch_create_order(eb, j) {
 			struct i915_capture_list *capture;
 
@@ -1957,9 +1964,10 @@ static void eb_capture_stage(struct i915_execbuffer *eb)
 				continue;
 
 			capture->next = eb->capture_lists[j];
-			capture->vma_res = i915_vma_resource_get(vma->resource);
+			capture->vma_snapshot = i915_vma_snapshot_get(vsnap);
 			eb->capture_lists[j] = capture;
 		}
+		i915_vma_snapshot_put(vsnap);
 	}
 }
 
@@ -3142,7 +3150,7 @@ eb_composite_fence_create(struct i915_execbuffer *eb, int out_fence_fd)
 	fence_array = dma_fence_array_create(eb->num_batches,
 					     fences,
 					     eb->context->parallel.fence_context,
-					     eb->context->parallel.seqno++,
+					     eb->context->parallel.seqno,
 					     false);
 	if (!fence_array) {
 		kfree(fences);
@@ -3262,8 +3270,9 @@ eb_requests_create(struct i915_execbuffer *eb, struct dma_fence *in_fence,
 		 * _onstack interface.
 		 */
 		if (eb->batches[i]->vma)
-			eb->requests[i]->batch_res =
-				i915_vma_resource_get(eb->batches[i]->vma->resource);
+			i915_vma_snapshot_init_onstack(&eb->requests[i]->batch_snapshot,
+						       eb->batches[i]->vma,
+						       "batch");
 		if (eb->batch_pool) {
 			GEM_BUG_ON(intel_context_is_parallel(eb->context));
 			intel_gt_buffer_pool_mark_active(eb->batch_pool,

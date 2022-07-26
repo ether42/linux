@@ -48,6 +48,7 @@
 #include "i915_gpu_error.h"
 #include "i915_memcpy.h"
 #include "i915_scatterlist.h"
+#include "i915_vma_snapshot.h"
 
 #define ALLOW_FAIL (__GFP_KSWAPD_RECLAIM | __GFP_RETRY_MAYFAIL | __GFP_NOWARN)
 #define ATOMIC_MAYFAIL (GFP_ATOMIC | __GFP_NOWARN)
@@ -1012,10 +1013,8 @@ void __i915_gpu_coredump_free(struct kref *error_ref)
 
 static struct i915_vma_coredump *
 i915_vma_coredump_create(const struct intel_gt *gt,
-			 const struct i915_vma_resource *vma_res,
-			 struct i915_vma_compress *compress,
-			 const char *name)
-
+			 const struct i915_vma_snapshot *vsnap,
+			 struct i915_vma_compress *compress)
 {
 	struct i915_ggtt *ggtt = gt->ggtt;
 	const u64 slot = ggtt->error_capture.start;
@@ -1025,7 +1024,7 @@ i915_vma_coredump_create(const struct intel_gt *gt,
 
 	might_sleep();
 
-	if (!vma_res || !vma_res->bi.pages || !compress)
+	if (!vsnap || !vsnap->pages || !compress)
 		return NULL;
 
 	dst = kmalloc(sizeof(*dst), ALLOW_FAIL);
@@ -1038,12 +1037,12 @@ i915_vma_coredump_create(const struct intel_gt *gt,
 	}
 
 	INIT_LIST_HEAD(&dst->page_list);
-	strcpy(dst->name, name);
+	strcpy(dst->name, vsnap->name);
 	dst->next = NULL;
 
-	dst->gtt_offset = vma_res->start;
-	dst->gtt_size = vma_res->node_size;
-	dst->gtt_page_sizes = vma_res->page_sizes_gtt;
+	dst->gtt_offset = vsnap->gtt_offset;
+	dst->gtt_size = vsnap->gtt_size;
+	dst->gtt_page_sizes = vsnap->page_sizes;
 	dst->unused = 0;
 
 	ret = -EINVAL;
@@ -1051,7 +1050,7 @@ i915_vma_coredump_create(const struct intel_gt *gt,
 		void __iomem *s;
 		dma_addr_t dma;
 
-		for_each_sgt_daddr(dma, iter, vma_res->bi.pages) {
+		for_each_sgt_daddr(dma, iter, vsnap->pages) {
 			mutex_lock(&ggtt->error_mutex);
 			ggtt->vm.insert_page(&ggtt->vm, dma, slot,
 					     I915_CACHE_NONE, 0);
@@ -1069,11 +1068,11 @@ i915_vma_coredump_create(const struct intel_gt *gt,
 			if (ret)
 				break;
 		}
-	} else if (vma_res->bi.lmem) {
-		struct intel_memory_region *mem = vma_res->mr;
+	} else if (vsnap->mr && vsnap->mr->type != INTEL_MEMORY_SYSTEM) {
+		struct intel_memory_region *mem = vsnap->mr;
 		dma_addr_t dma;
 
-		for_each_sgt_daddr(dma, iter, vma_res->bi.pages) {
+		for_each_sgt_daddr(dma, iter, vsnap->pages) {
 			void __iomem *s;
 
 			s = io_mapping_map_wc(&mem->iomap,
@@ -1089,7 +1088,7 @@ i915_vma_coredump_create(const struct intel_gt *gt,
 	} else {
 		struct page *page;
 
-		for_each_sgt_page(page, iter, vma_res->bi.pages) {
+		for_each_sgt_page(page, iter, vsnap->pages) {
 			void *s;
 
 			drm_clflush_pages(&page, 1);
@@ -1325,32 +1324,33 @@ static bool record_context(struct i915_gem_context_coredump *e,
 
 struct intel_engine_capture_vma {
 	struct intel_engine_capture_vma *next;
-	struct i915_vma_resource *vma_res;
+	struct i915_vma_snapshot *vsnap;
 	char name[16];
 	bool lockdep_cookie;
 };
 
 static struct intel_engine_capture_vma *
 capture_vma_snapshot(struct intel_engine_capture_vma *next,
-		     struct i915_vma_resource *vma_res,
-		     gfp_t gfp, const char *name)
+		     struct i915_vma_snapshot *vsnap,
+		     gfp_t gfp)
 {
 	struct intel_engine_capture_vma *c;
 
-	if (!vma_res)
+	if (!i915_vma_snapshot_present(vsnap))
 		return next;
 
 	c = kmalloc(sizeof(*c), gfp);
 	if (!c)
 		return next;
 
-	if (!i915_vma_resource_hold(vma_res, &c->lockdep_cookie)) {
+	if (!i915_vma_snapshot_resource_pin(vsnap, &c->lockdep_cookie)) {
 		kfree(c);
 		return next;
 	}
 
-	strcpy(c->name, name);
-	c->vma_res = i915_vma_resource_get(vma_res);
+	strcpy(c->name, vsnap->name);
+	c->vsnap = vsnap;
+	i915_vma_snapshot_get(vsnap);
 
 	c->next = next;
 	return c;
@@ -1362,6 +1362,8 @@ capture_vma(struct intel_engine_capture_vma *next,
 	    const char *name,
 	    gfp_t gfp)
 {
+	struct i915_vma_snapshot *vsnap;
+
 	if (!vma)
 		return next;
 
@@ -1370,10 +1372,19 @@ capture_vma(struct intel_engine_capture_vma *next,
 	 * to a struct i915_vma_snapshot at command submission time.
 	 * Not here.
 	 */
-	if (GEM_WARN_ON(!i915_vma_is_pinned(vma)))
+	GEM_WARN_ON(!i915_vma_is_pinned(vma));
+	if (!i915_vma_is_pinned(vma))
 		return next;
 
-	next = capture_vma_snapshot(next, vma->resource, gfp, name);
+	vsnap = i915_vma_snapshot_alloc(gfp);
+	if (!vsnap)
+		return next;
+
+	i915_vma_snapshot_init(vsnap, vma, name);
+	next = capture_vma_snapshot(next, vsnap, gfp);
+
+	/* FIXME: Replace on async unbind. */
+	i915_vma_snapshot_put(vsnap);
 
 	return next;
 }
@@ -1386,8 +1397,7 @@ capture_user(struct intel_engine_capture_vma *capture,
 	struct i915_capture_list *c;
 
 	for (c = rq->capture_list; c; c = c->next)
-		capture = capture_vma_snapshot(capture, c->vma_res, gfp,
-					       "user");
+		capture = capture_vma_snapshot(capture, c->vma_snapshot, gfp);
 
 	return capture;
 }
@@ -1405,19 +1415,16 @@ static struct i915_vma_coredump *
 create_vma_coredump(const struct intel_gt *gt, struct i915_vma *vma,
 		    const char *name, struct i915_vma_compress *compress)
 {
-	struct i915_vma_coredump *ret = NULL;
-	struct i915_vma_resource *vma_res;
-	bool lockdep_cookie;
+	struct i915_vma_coredump *ret;
+	struct i915_vma_snapshot tmp;
 
 	if (!vma)
 		return NULL;
 
-	vma_res = vma->resource;
-
-	if (i915_vma_resource_hold(vma_res, &lockdep_cookie)) {
-		ret = i915_vma_coredump_create(gt, vma_res, compress, name);
-		i915_vma_resource_unhold(vma_res, lockdep_cookie);
-	}
+	GEM_WARN_ON(!i915_vma_is_pinned(vma));
+	i915_vma_snapshot_init_onstack(&tmp, vma, name);
+	ret = i915_vma_coredump_create(gt, &tmp, compress);
+	i915_vma_snapshot_put_onstack(&tmp);
 
 	return ret;
 }
@@ -1464,7 +1471,7 @@ intel_engine_coredump_add_request(struct intel_engine_coredump *ee,
 	 * as the simplest method to avoid being overwritten
 	 * by userspace.
 	 */
-	vma = capture_vma_snapshot(vma, rq->batch_res, gfp, "batch");
+	vma = capture_vma_snapshot(vma, &rq->batch_snapshot, gfp);
 	vma = capture_user(vma, rq, gfp);
 	vma = capture_vma(vma, rq->ring->vma, "ring", gfp);
 	vma = capture_vma(vma, rq->context->state, "HW context", gfp);
@@ -1485,14 +1492,14 @@ intel_engine_coredump_add_vma(struct intel_engine_coredump *ee,
 
 	while (capture) {
 		struct intel_engine_capture_vma *this = capture;
-		struct i915_vma_resource *vma_res = this->vma_res;
+		struct i915_vma_snapshot *vsnap = this->vsnap;
 
 		add_vma(ee,
-			i915_vma_coredump_create(engine->gt, vma_res,
-						 compress, this->name));
+			i915_vma_coredump_create(engine->gt,
+						 vsnap, compress));
 
-		i915_vma_resource_unhold(vma_res, this->lockdep_cookie);
-		i915_vma_resource_put(vma_res);
+		i915_vma_snapshot_resource_unpin(vsnap, this->lockdep_cookie);
+		i915_vma_snapshot_put(vsnap);
 
 		capture = this->next;
 		kfree(this);

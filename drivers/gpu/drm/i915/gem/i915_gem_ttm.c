@@ -424,14 +424,16 @@ int i915_ttm_purge(struct drm_i915_gem_object *obj)
 	return 0;
 }
 
-static int i915_ttm_shrink(struct drm_i915_gem_object *obj, unsigned int flags)
+static int i915_ttm_shrinker_release_pages(struct drm_i915_gem_object *obj,
+					   bool no_wait_gpu,
+					   bool should_writeback)
 {
 	struct ttm_buffer_object *bo = i915_gem_to_ttm(obj);
 	struct i915_ttm_tt *i915_tt =
 		container_of(bo->ttm, typeof(*i915_tt), ttm);
 	struct ttm_operation_ctx ctx = {
 		.interruptible = true,
-		.no_wait_gpu = flags & I915_GEM_OBJECT_SHRINK_NO_GPU_WAIT,
+		.no_wait_gpu = no_wait_gpu,
 	};
 	struct ttm_placement place = {};
 	int ret;
@@ -465,7 +467,7 @@ static int i915_ttm_shrink(struct drm_i915_gem_object *obj, unsigned int flags)
 		return ret;
 	}
 
-	if (flags & I915_GEM_OBJECT_SHRINK_WRITEBACK)
+	if (should_writeback)
 		__shmem_writeback(obj->base.size, i915_tt->filp->f_mapping);
 
 	return 0;
@@ -975,7 +977,7 @@ static const struct drm_i915_gem_object_ops i915_gem_ttm_obj_ops = {
 	.get_pages = i915_ttm_get_pages,
 	.put_pages = i915_ttm_put_pages,
 	.truncate = i915_ttm_truncate,
-	.shrink = i915_ttm_shrink,
+	.shrinker_release_pages = i915_ttm_shrinker_release_pages,
 
 	.adjust_lru = i915_ttm_adjust_lru,
 	.delayed_free = i915_ttm_delayed_free,

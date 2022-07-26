@@ -922,28 +922,26 @@ int i915_vma_mock_selftests(void)
 		SUBTEST(igt_vma_partial),
 	};
 	struct drm_i915_private *i915;
-	struct intel_gt *gt;
+	struct i915_ggtt *ggtt;
 	int err;
 
 	i915 = mock_gem_device();
 	if (!i915)
 		return -ENOMEM;
 
-	/* allocate the ggtt */
-	err = intel_gt_assign_ggtt(to_gt(i915));
-	if (err)
+	ggtt = kmalloc(sizeof(*ggtt), GFP_KERNEL);
+	if (!ggtt) {
+		err = -ENOMEM;
 		goto out_put;
+	}
+	mock_init_ggtt(i915, ggtt);
 
-	gt = to_gt(i915);
-
-	mock_init_ggtt(gt);
-
-	err = i915_subtests(tests, gt->ggtt);
+	err = i915_subtests(tests, ggtt);
 
 	mock_device_flush(i915);
 	i915_gem_drain_freed_objects(i915);
-	mock_fini_ggtt(gt->ggtt);
-
+	mock_fini_ggtt(ggtt);
+	kfree(ggtt);
 out_put:
 	mock_destroy_device(i915);
 	return err;
@@ -984,7 +982,7 @@ static int igt_vma_remapped_gtt(void *arg)
 	intel_wakeref_t wakeref;
 	int err = 0;
 
-	if (!i915_ggtt_has_aperture(to_gt(i915)->ggtt))
+	if (!i915_ggtt_has_aperture(&i915->ggtt))
 		return 0;
 
 	obj = i915_gem_object_create_internal(i915, 10 * 10 * PAGE_SIZE);

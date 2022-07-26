@@ -48,7 +48,7 @@ static void dpt_insert_page(struct i915_address_space *vm,
 }
 
 static void dpt_insert_entries(struct i915_address_space *vm,
-			       struct i915_vma_resource *vma_res,
+			       struct i915_vma *vma,
 			       enum i915_cache_level level,
 			       u32 flags)
 {
@@ -64,8 +64,8 @@ static void dpt_insert_entries(struct i915_address_space *vm,
 	 * not to allow the user to override access to a read only page.
 	 */
 
-	i = vma_res->start / I915_GTT_PAGE_SIZE;
-	for_each_sgt_daddr(addr, sgt_iter, vma_res->bi.pages)
+	i = vma->node.start / I915_GTT_PAGE_SIZE;
+	for_each_sgt_daddr(addr, sgt_iter, vma->pages)
 		gen8_set_pte(&base[i++], pte_encode | addr);
 }
 
@@ -76,38 +76,35 @@ static void dpt_clear_range(struct i915_address_space *vm,
 
 static void dpt_bind_vma(struct i915_address_space *vm,
 			 struct i915_vm_pt_stash *stash,
-			 struct i915_vma_resource *vma_res,
+			 struct i915_vma *vma,
 			 enum i915_cache_level cache_level,
 			 u32 flags)
 {
+	struct drm_i915_gem_object *obj = vma->obj;
 	u32 pte_flags;
-
-	if (vma_res->bound_flags)
-		return;
 
 	/* Applicable to VLV (gen8+ do not support RO in the GGTT) */
 	pte_flags = 0;
-	if (vm->has_read_only && vma_res->bi.readonly)
+	if (vma->vm->has_read_only && i915_gem_object_is_readonly(obj))
 		pte_flags |= PTE_READ_ONLY;
-	if (vma_res->bi.lmem)
+	if (i915_gem_object_is_lmem(obj))
 		pte_flags |= PTE_LM;
 
-	vm->insert_entries(vm, vma_res, cache_level, pte_flags);
+	vma->vm->insert_entries(vma->vm, vma, cache_level, pte_flags);
 
-	vma_res->page_sizes_gtt = I915_GTT_PAGE_SIZE;
+	vma->page_sizes.gtt = I915_GTT_PAGE_SIZE;
 
 	/*
 	 * Without aliasing PPGTT there's no difference between
 	 * GLOBAL/LOCAL_BIND, it's all the same ptes. Hence unconditionally
 	 * upgrade to both bound if we bind either to avoid double-binding.
 	 */
-	vma_res->bound_flags = I915_VMA_GLOBAL_BIND | I915_VMA_LOCAL_BIND;
+	atomic_or(I915_VMA_GLOBAL_BIND | I915_VMA_LOCAL_BIND, &vma->flags);
 }
 
-static void dpt_unbind_vma(struct i915_address_space *vm,
-			   struct i915_vma_resource *vma_res)
+static void dpt_unbind_vma(struct i915_address_space *vm, struct i915_vma *vma)
 {
-	vm->clear_range(vm, vma_res->start, vma_res->vma_size);
+	vm->clear_range(vm, vma->node.start, vma->size);
 }
 
 static void dpt_cleanup(struct i915_address_space *vm)

@@ -370,9 +370,9 @@ static int igt_check_page_sizes(struct i915_vma *vma)
 		err = -EINVAL;
 	}
 
-	if (!HAS_PAGE_SIZES(i915, vma->resource->page_sizes_gtt)) {
+	if (!HAS_PAGE_SIZES(i915, vma->page_sizes.gtt)) {
 		pr_err("unsupported page_sizes.gtt=%u, supported=%u\n",
-		       vma->resource->page_sizes_gtt & ~supported, supported);
+		       vma->page_sizes.gtt & ~supported, supported);
 		err = -EINVAL;
 	}
 
@@ -403,9 +403,15 @@ static int igt_check_page_sizes(struct i915_vma *vma)
 	if (i915_gem_object_is_lmem(obj) &&
 	    IS_ALIGNED(vma->node.start, SZ_2M) &&
 	    vma->page_sizes.sg & SZ_2M &&
-	    vma->resource->page_sizes_gtt < SZ_2M) {
+	    vma->page_sizes.gtt < SZ_2M) {
 		pr_err("gtt pages mismatch for LMEM, expected 2M GTT pages, sg(%u), gtt(%u)\n",
-		       vma->page_sizes.sg, vma->resource->page_sizes_gtt);
+		       vma->page_sizes.sg, vma->page_sizes.gtt);
+		err = -EINVAL;
+	}
+
+	if (obj->mm.page_sizes.gtt) {
+		pr_err("obj->page_sizes.gtt(%u) should never be set\n",
+		       obj->mm.page_sizes.gtt);
 		err = -EINVAL;
 	}
 
@@ -541,9 +547,9 @@ static int igt_mock_memory_region_huge_pages(void *arg)
 				goto out_unpin;
 			}
 
-			if (vma->resource->page_sizes_gtt != page_size) {
+			if (vma->page_sizes.gtt != page_size) {
 				pr_err("%s page_sizes.gtt=%u, expected=%u\n",
-				       __func__, vma->resource->page_sizes_gtt,
+				       __func__, vma->page_sizes.gtt,
 				       page_size);
 				err = -EINVAL;
 				goto out_unpin;
@@ -624,9 +630,9 @@ static int igt_mock_ppgtt_misaligned_dma(void *arg)
 
 		err = igt_check_page_sizes(vma);
 
-		if (vma->resource->page_sizes_gtt != page_size) {
+		if (vma->page_sizes.gtt != page_size) {
 			pr_err("page_sizes.gtt=%u, expected %u\n",
-			       vma->resource->page_sizes_gtt, page_size);
+			       vma->page_sizes.gtt, page_size);
 			err = -EINVAL;
 		}
 
@@ -651,10 +657,9 @@ static int igt_mock_ppgtt_misaligned_dma(void *arg)
 
 			err = igt_check_page_sizes(vma);
 
-			if (vma->resource->page_sizes_gtt != I915_GTT_PAGE_SIZE_4K) {
+			if (vma->page_sizes.gtt != I915_GTT_PAGE_SIZE_4K) {
 				pr_err("page_sizes.gtt=%u, expected %llu\n",
-				       vma->resource->page_sizes_gtt,
-				       I915_GTT_PAGE_SIZE_4K);
+				       vma->page_sizes.gtt, I915_GTT_PAGE_SIZE_4K);
 				err = -EINVAL;
 			}
 
@@ -800,9 +805,9 @@ static int igt_mock_ppgtt_huge_fill(void *arg)
 			}
 		}
 
-		if (vma->resource->page_sizes_gtt != expected_gtt) {
+		if (vma->page_sizes.gtt != expected_gtt) {
 			pr_err("gtt=%u, expected=%u, size=%zd, single=%s\n",
-			       vma->resource->page_sizes_gtt, expected_gtt,
+			       vma->page_sizes.gtt, expected_gtt,
 			       obj->base.size, yesno(!!single));
 			err = -EINVAL;
 			break;
@@ -956,10 +961,10 @@ static int igt_mock_ppgtt_64K(void *arg)
 				}
 			}
 
-			if (vma->resource->page_sizes_gtt != expected_gtt) {
+			if (vma->page_sizes.gtt != expected_gtt) {
 				pr_err("gtt=%u, expected=%u, i=%d, single=%s\n",
-				       vma->resource->page_sizes_gtt,
-				       expected_gtt, i, yesno(!!single));
+				       vma->page_sizes.gtt, expected_gtt, i,
+				       yesno(!!single));
 				err = -EINVAL;
 				goto out_vma_unpin;
 			}

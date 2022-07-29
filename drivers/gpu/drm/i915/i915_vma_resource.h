@@ -62,8 +62,6 @@ static inline void i915_vma_resource_put(struct i915_vma_resource *vma_res)
 	dma_fence_put(&vma_res->unbind_fence);
 }
 
-#if IS_ENABLED(CONFIG_DRM_I915_SELFTEST)
 void i915_vma_resource_init(struct i915_vma_resource *vma_res);
-#endif
 
 #endif
